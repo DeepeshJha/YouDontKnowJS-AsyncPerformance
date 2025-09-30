@@ -1,96 +1,96 @@
-# Chapter 2: Callbacks — Detailed Notes
+# Chapter 2: Callbacks
+
+Callbacks are the most fundamental way to express asynchrony in JavaScript. In fact, every single async program you've ever written or used in JS, from the simplest one-liner to the most complex, is built on callbacks.
 
 ---
 
-## 1. Callbacks: The Foundation of JS Asynchrony
+## Continuations and the "Gap"
 
-- Callbacks are functions "called back" by the event loop when async events are ready.
-- The most fundamental async pattern in JavaScript.
-- Most JS programs, even complex ones, are built on callbacks.
+A callback is a function that you pass to another function, to be "called back" later when an async event completes. In other words, the callback represents the continuation of your program.
 
----
+Whenever you introduce a callback, you introduce a gap—a place in your code where the flow "jumps" from one part to another, often after some asynchronous event.
 
-## 2. Continuations
+Example:
 
-- Callbacks encapsulate the **continuation** of your program—the "rest" that runs after an async step.
-- **Example:**
-  ```js
-  // A
-  setTimeout(function() {
-    // C
-  }, 1000);
-  // B
-  ```
-  - A and B run now; C runs later (after 1 second).
+```js
+// A
+setTimeout(function(){
+  // C
+}, 1000);
+// B
+```
 
-**Key observation:**  
-Introducing a callback creates a subtle but significant divergence between how our brains expect code to run (sequentially) and how it actually does (nonlinear, evented).
+Here, "A" runs, then "B" runs, and after 1 second, "C" runs. The "gap" is the time between B and C.
 
 ---
 
-## 3. The Sequential Brain
+## The Sequential Brain vs. Async Code
 
-- Humans naturally **plan** tasks sequentially (A, then B, then C).
-- Our brains actually operate much like an event loop: single-tasking, but rapidly context-switching.
-- Synchronous code matches our mental planning; async code with callbacks does not.
+Humans naturally plan sequentially: do A, then B, then C. Synchronous code works the same way.
 
-**Example:**
+But with asynchrony, our brains struggle. We have to plan around the fact that code may run "out of order" or later than expected.
+
+Example (synchronous swap):
+
 ```js
 z = x;
 x = y;
 y = z;
 ```
-- Each statement waits for the previous to finish.
 
-But async code is more like:
-- A, then (maybe B, maybe C, maybe D), maybe in unpredictable order.
+Async code with callbacks makes this sort of sequential reasoning difficult, especially as your program grows.
 
 ---
 
-## 4. Callback Hell: Nested/Chained Callbacks
+## Callback Hell (Pyramid of Doom)
 
-- **Callback hell** (a.k.a. "pyramid of doom") refers to nested async code, not just indentation but confusion in flow.
-- **Example:**
-  ```js
-  listen("click", function handler(evt) {
-    setTimeout(function request() {
-      ajax("http://some.url.1", function response(text) {
-        if (text == "hello") handler();
-        else if (text == "world") request();
-      });
-    }, 500);
-  });
-  ```
-- Even if you "flatten" code by naming callbacks, you still have to jump around to follow the flow.
+Callback hell is what happens when you chain callbacks deeply, making code hard to read and reason about. It's not just about indentation—it's about the loss of clarity in program flow.
 
-**Problem:**  
-Linking steps together with callbacks is brittle, hard to generalize, and error-prone—especially when you need error handling, retries, or forking logic.
+Example:
 
----
-
-## 5. Inversion of Control and Trust Issues
-
-- When you give your callback to a utility (especially third-party), you lose control—**inversion of control**.
-- The utility can:
-  - Call your callback too early.
-  - Call it too late (or never).
-  - Call it too many or too few times.
-  - Fail to pass necessary parameters.
-  - Swallow errors/exceptions.
-
-**Example:**
 ```js
-analytics.trackPurchase(purchaseData, function() {
+listen("click", function handler(evt){
+  setTimeout(function request(){
+    ajax("http://some.url.1", function response(text){
+      if (text == "hello") handler();
+      else if (text == "world") request();
+    });
+  }, 500);
+});
+```
+
+Even if you name your callbacks and flatten them, the logical flow is still hard to follow.
+
+---
+
+## Inversion of Control and Trust Issues
+
+When you pass a callback to another party (a library, an API), you give up control over how and when your function is called. This is called **inversion of control**.
+
+You have to trust the other party to:
+- Call your callback at the correct time (not too early, not too late, not never)
+- Call it the correct number of times (not zero, not more than once)
+- Pass the correct parameters/environment
+- Not swallow errors/exceptions
+
+---
+
+## Real-World Trust Hazards
+
+Suppose a library calls your callback multiple times by accident. For example:
+
+```js
+analytics.trackPurchase(purchaseData, function(){
   chargeCreditCard();
   displayThankyouPage();
 });
 ```
-- If the utility calls your callback five times, your customer might get charged five times!
 
-**Mitigation:**
+If the library calls your callback 5 times, a customer may be charged 5 times! You can add a latch:
+
 ```js
 var tracked = false;
-analytics.trackPurchase(purchaseData, function() {
+analytics.trackPurchase(purchaseData, function(){
   if (!tracked) {
     tracked = true;
     chargeCreditCard();
@@ -98,76 +98,130 @@ analytics.trackPurchase(purchaseData, function() {
   }
 });
 ```
-- But now, what if they *never* call your callback? More ad hoc logic required.
 
-**List of possible misbehaviors:**
-- Call too early
-- Call too late/never
-- Call too few/many times
-- Fail to pass parameters
-- Swallow errors
+But what if the callback is never called? Or called with the wrong arguments? Or an error is swallowed?
 
 ---
 
-## 6. Defensive Coding (Even With Your Own Code)
+## Defensive Patterns for Callbacks
 
-- Defensive programming for callbacks is like input validation for functions.
-- Even your own utilities may need checks, as you can't always guarantee code will behave.
-- Defensive patterns:
-  - Type checking
-  - Conversions
-  - Latches, gates, timeouts, etc.
+Defensive programming is needed to guard against these hazards. Examples:
+- Type validation
+- Conversion/casting
+- Latches, gates, and timeouts
+
+It's not just for third-party code—you should do this even in your own code.
 
 ---
 
-## 7. Callback Patterns and Their Limits
+## Callback API Patterns and Their Drawbacks
 
 ### Split Callbacks (Success/Error)
+
 ```js
 function success(data) { ... }
 function failure(err) { ... }
 ajax("url", success, failure);
 ```
-- More verbose, but still doesn't prevent too many/few calls or both/no calls.
+- Verbose; does not guarantee correct behavior.
 
-### Error-First Callbacks (Node.js Style)
+### Error-First Callbacks (Node.js/Errback Style)
+
 ```js
 function response(err, data) { ... }
 ajax("url", response);
 ```
-- If error, first argument is set; otherwise it's falsy and remaining arguments are success data.
+- If error, first argument is set; otherwise, it's falsy.
 
 ### Timeoutify Utility
+
 ```js
-function timeoutify(fn, delay) { ... }
+function timeoutify(fn, delay) {
+  var intv = setTimeout(function(){
+    intv = null;
+    fn(new Error("Timeout!"));
+  }, delay);
+  return function() {
+    if (intv) {
+      clearTimeout(intv);
+      fn.apply(this, arguments);
+    }
+  };
+}
 ajax("url", timeoutify(foo, 500));
 ```
-- Prevents "never called" by making sure the callback is invoked after a delay, if it hasn't been already.
+- Ensures callback is called after a delay, if not already.
 
-### Asyncify Utility
+### Asyncify Utility (Preventing Zalgo)
+
 ```js
-function asyncify(fn) { ... }
+function asyncify(fn) {
+  var orig_fn = fn,
+      intv = setTimeout(function(){
+        intv = null;
+        if (fn) fn();
+      }, 0);
+  fn = null;
+  return function() {
+    if (intv) {
+      fn = orig_fn.bind.apply(
+        orig_fn,
+        [this].concat([].slice.call(arguments))
+      );
+    } else {
+      orig_fn.apply(this, arguments);
+    }
+  };
+}
 ajax("url", asyncify(result));
 ```
-- Ensures callback is always invoked asynchronously (prevents Zalgo).
+- Ensures callback is always async, regardless of underlying event source.
 
 ---
 
-## 8. The Zalgo Problem
+## The Zalgo Problem
 
-- Some APIs may call your callback synchronously or asynchronously depending on conditions (e.g., cache hit/miss).
-- This unpredictability ("releasing Zalgo") leads to hard-to-find bugs.
-- Always async your callbacks to ensure predictable async flow.
+Some APIs may call your callback synchronously or asynchronously depending on context (cache hit vs. network). This unpredictability is called "releasing Zalgo" and is a major source of bugs. Always async your callbacks to ensure predictable async flow.
 
 ---
 
-## 9. Review & Key Takeaways
+## Real-World Example: The Tale of Five Callbacks
 
-- **Callbacks** are the foundation of JS asynchrony, but:
-  1. They break our natural sequential reasoning, making code harder to write, debug, and maintain.
-  2. They suffer from inversion of control, leading to trust issues, bugs, and repetitive defensive patterns.
-- Patterns like split/error-first callbacks, timeoutify, and asyncify help, but are verbose and don't solve all issues.
-- As JS matures, we need a more robust, reusable solution for expressing asynchrony in a way that matches how we think and plan code.
-- **Promises (next chapter)** are the next step in solving these issues.
+A real bug: an analytics utility calls the callback 5 times, charging a customer 5 times.
+
+Defensive code (latch) helps, but you also have to worry about:
+- Callback never called
+- Callback called too early/late
+- Callback called too many/few times
+- Environment/parameters not passed
+- Errors/exceptions swallowed
+
+---
+
+## Limitations of Callbacks
+
+- Repetitive, error-prone defensive code is required everywhere.
+- Patterns like split callbacks, error-first, timeoutify, asyncify help, but are verbose and don't solve all problems.
+- You can't even fully trust your own code.
+
+---
+
+## Callbacks and Sequential Brain Planning
+
+Our brains plan tasks as a sequence ("to-do" lists). When forced to plan for asynchrony, our thinking (and code) becomes messy and nonlinear. Callback hell is not just about nesting—it's about the loss of clarity and predictability in mapping planned steps to code and code to execution.
+
+---
+
+## Why Callbacks Are Not Enough
+
+- Callbacks break our natural, sequential reasoning, making code harder to reason about, debug, and maintain.
+- Inversion of control leads to trust issues and repetitive, defensive code.
+- Ad hoc utilities (split callbacks, error-first, timeoutify, asyncify) add boilerplate and don't address all issues.
+
+---
+
+## The Need for Something Better
+
+Promises (next chapter) are the answer: a more robust, standardized way to express asynchrony, sequentiality, and trust in JS code.
 
 ---
